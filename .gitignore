@@ -1,0 +1,23 @@
+# Ignore Python and environment artifacts
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore batch file and generated output
+run.bat
+
+# Ignore resume data folders and raw documents
+jd_backend_developer/
+jd_data_engineer/
+jd_ml_engineer/
+JDs/
+Matched_Resumes/
+Resumes/
+
+# Ignore local VS Code settings
+.vscode/
+
+# Ignore node_modules if created later
+frontend/node_modules/
