@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import tkinter as tk
-from tkinter import filedialog
+from fastapi.responses import FileResponse
+
 from matcher import match_resumes
-import threading
+
+import os
+import shutil
+import uuid
+
 
 app = FastAPI()
 
@@ -15,34 +18,181 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def pick_folder():
-    # Use tkinter to open a folder dialog natively
-    root = tk.Tk()
-    root.attributes("-topmost", True)
-    root.withdraw()
-    folder_path = filedialog.askdirectory()
-    root.destroy()
-    return folder_path
 
-@app.get("/api/select-folder")
-def select_folder():
-    path = pick_folder()
-    return {"path": path}
+# ==============================
+# CONFIG
+# ==============================
 
-class MatchRequest(BaseModel):
-    jd_folder: str
-    resume_folder: str
-    output_folder: str
-    top_k: int = 5
+TEMP_ROOT = "temp_results"
+
+
+# ==============================
+# MATCH + ZIP
+# ==============================
 
 @app.post("/api/match")
-def match(req: MatchRequest):
+async def match(
+    jd_files: list[UploadFile] = File(...),
+    resume_files: list[UploadFile] = File(...),
+    top_k: int = Form(5)
+):
+
+    run_id = str(uuid.uuid4())
+
+    base_dir = os.path.join(
+        TEMP_ROOT,
+        run_id
+    )
+
+    jd_folder = os.path.join(
+        base_dir,
+        "JDs"
+    )
+
+    resume_folder = os.path.join(
+        base_dir,
+        "Resumes"
+    )
+
+    output_folder = os.path.join(
+        base_dir,
+        "Matched_Resumes"
+    )
+
     try:
-        match_resumes(req.jd_folder, req.resume_folder, req.output_folder, req.top_k)
-        return {"status": "success", "message": "Matching complete!"}
+
+        # ==============================
+        # CREATE DIRECTORIES
+        # ==============================
+
+        os.makedirs(jd_folder, exist_ok=True)
+        os.makedirs(resume_folder, exist_ok=True)
+        os.makedirs(output_folder, exist_ok=True)
+
+
+        # ==============================
+        # SAVE JD FILES
+        # ==============================
+
+        for file in jd_files:
+
+            if not file.filename:
+                continue
+
+            filename = os.path.basename(file.filename)
+
+            file_path = os.path.join(
+                jd_folder,
+                filename
+            )
+
+            with open(file_path, "wb") as buffer:
+
+                shutil.copyfileobj(
+                    file.file,
+                    buffer
+                )
+
+
+        # ==============================
+        # SAVE RESUME FILES
+        # ==============================
+
+        for file in resume_files:
+
+            if not file.filename:
+                continue
+
+            filename = os.path.basename(file.filename)
+
+            file_path = os.path.join(
+                resume_folder,
+                filename
+            )
+
+            with open(file_path, "wb") as buffer:
+
+                shutil.copyfileobj(
+                    file.file,
+                    buffer
+                )
+
+
+        # ==============================
+        # RUN MATCHER
+        # ==============================
+
+        match_resumes(
+            jd_folder,
+            resume_folder,
+            output_folder,
+            top_k
+        )
+
+
+        # ==============================
+        # CREATE ZIP
+        # ==============================
+
+        zip_base = os.path.join(
+            base_dir,
+            "Matched_Resumes"
+        )
+
+        zip_path = shutil.make_archive(
+            zip_base,
+            "zip",
+            output_folder
+        )
+
+
+        # ==============================
+        # RETURN ZIP
+        # ==============================
+
+        return FileResponse(
+            path=zip_path,
+            media_type="application/zip",
+            filename="Matched_Resumes.zip"
+        )
+
+
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+
+        # Clean up if something fails
+        if os.path.exists(base_dir):
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+# ==============================
+# HEALTH CHECK
+# ==============================
+
+@app.get("/")
+def root():
+
+    return {
+        "status": "running",
+        "message": "Resume Matcher API"
+    }
+
+
+# ==============================
+# RUN SERVER
+# ==============================
 
 if __name__ == "__main__":
+
     import uvicorn
-    uvicorn.run("backend:app", host="127.0.0.1", port=8000, reload=True)
+
+    uvicorn.run(
+        "backend:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True
+    )

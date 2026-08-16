@@ -15,9 +15,9 @@ jd_ml_engineer/
 JDs/
 Matched_Resumes/
 Resumes/
-
+temp_results/
 # Ignore local VS Code settings
 .vscode/
-
+.env
 # Ignore node_modules if created later
 frontend/node_modules/

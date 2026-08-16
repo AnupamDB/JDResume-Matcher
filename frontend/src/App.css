@@ -119,8 +119,9 @@ button {
 .btn-secondary {
   background-color: var(--secondary-color);
   color: white;
-  padding: 0 1.25rem;
-  font-size: 0.9rem;
+  padding: 8px 1rem;
+  font-size: 0.85rem;
+  border-radius: 10px;
 }
 
 .btn-secondary:hover {
