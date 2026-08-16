@@ -5,7 +5,6 @@ import re
 
 import pdfplumber
 import docx
-import numpy as np
 import faiss
 import torch
 
@@ -13,10 +12,14 @@ from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.runnables import RunnableLambda
 
-# ==============================
+
+# ============================================================
 # CONFIG
-# ==============================
+# ============================================================
 
 JD_FOLDER = "JDs"
 RESUME_FOLDER = "Resumes"
@@ -24,15 +27,14 @@ OUTPUT_FOLDER = "Matched_Resumes"
 
 TOP_K = 5
 
-EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 
-# Hugging Face Qwen model
-LLM_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+LLM_MODEL = "Qwen/Qwen3-4B-Instruct-2507:nscale"
 
 
-# ==============================
-# LOAD ENVIRONMENT
-# ==============================
+# ============================================================
+# ENVIRONMENT
+# ============================================================
 
 load_dotenv()
 
@@ -45,41 +47,47 @@ if not HF_TOKEN:
     )
 
 
-# ==============================
+# ============================================================
 # HUGGING FACE CLIENT
-# ==============================
+# ============================================================
 
 qwen_client = InferenceClient(
     api_key=HF_TOKEN
 )
 
 
-# ==============================
-# DEVICE SETUP
-# ==============================
+# ============================================================
+# DEVICE
+# ============================================================
 
 if torch.cuda.is_available():
-
     device = "cuda"
-
     print(
         f"🚀 Using GPU: "
         f"{torch.cuda.get_device_name(0)}"
     )
-
 else:
-
     device = "cpu"
-
-    print(
-        "⚠️ GPU not available. "
-        "Using CPU."
-    )
+    print("⚠️ Using CPU.")
 
 
-# ==============================
+# ============================================================
+# BGE EMBEDDING MODEL
+# ============================================================
+
+print("Loading embedding model...")
+
+embedding_model = SentenceTransformer(
+    EMBEDDING_MODEL,
+    device=device
+)
+
+print("✅ Embedding model loaded.")
+
+
+# ============================================================
 # TEXT EXTRACTION
-# ==============================
+# ============================================================
 
 def extract_text(file_path):
 
@@ -90,28 +98,27 @@ def extract_text(file_path):
         with pdfplumber.open(file_path) as pdf:
 
             for page in pdf.pages:
-
                 text += page.extract_text() or ""
 
     elif file_path.lower().endswith(".docx"):
 
-        doc = docx.Document(file_path)
+        document = docx.Document(file_path)
 
         text = "\n".join(
-            para.text
-            for para in doc.paragraphs
+            paragraph.text
+            for paragraph in document.paragraphs
         )
 
     return text.strip()
 
 
-# ==============================
+# ============================================================
 # LOAD DOCUMENTS
-# ==============================
+# ============================================================
 
 def load_documents(folder):
 
-    docs = {}
+    documents = {}
 
     for file in os.listdir(folder):
 
@@ -130,105 +137,196 @@ def load_documents(folder):
 
         if not text:
             print(
-                f"⚠️ No text extracted from "
-                f"{file}"
+                f"⚠️ No text extracted from {file}"
             )
             continue
 
-        docs[file] = {
+        documents[file] = {
             "path": path,
             "text": text
         }
 
-    return docs
+    return documents
 
 
-# ==============================
-# QWEN RESUME EVALUATION
-# ==============================
+# ============================================================
+# LANGCHAIN QWEN PROMPT
+# ============================================================
 
-def evaluate_resume_with_qwen(
-    jd_text,
-    resume_text
-):
+qwen_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        """You are an expert technical recruiter.
 
-    prompt = f"""
-You are an expert technical recruiter.
+You will receive a JOB DESCRIPTION and a CANDIDATE RESUME.
 
-Evaluate the candidate resume against the job description.
+Your task is to evaluate the candidate against the job description.
 
-JOB DESCRIPTION:
-----------------
-{jd_text}
+You MUST actually analyze the documents provided.
+Do not ask the user for the documents.
+Do not respond with an introduction.
+Do not explain what you are going to do.
 
-CANDIDATE RESUME:
------------------
-{resume_text}
+Return ONLY a valid JSON object.
 
-Evaluate:
-
-1. Technical skills match
-2. Required experience match
-3. Relevant technologies
-4. Education/certification relevance
-5. Missing required skills
-6. Overall suitability
-
-Return ONLY valid JSON in exactly this format:
+Use exactly this structure:
 
 {{
-    "overall_score": 0,
-    "technical_score": 0,
-    "experience_score": 0,
-    "matched_skills": [],
-    "missing_skills": [],
-    "strengths": [],
-    "weaknesses": [],
-    "recommendation": "",
-    "reason": ""
+  "overall_score": 0,
+  "technical_score": 0,
+  "experience_score": 0,
+  "matched_skills": [],
+  "missing_skills": [],
+  "strengths": [],
+  "weaknesses": [],
+  "recommendation": "",
+  "reason": ""
 }}
 
-Rules:
+Scores must be integers from 0 to 100.
 
-- Scores must be between 0 and 100.
-- Do not invent information.
-- Only use information available in the resume.
-- Return JSON only.
-"""
+The recommendation must be one of:
+"Strong Match"
+"Moderate Match"
+"Weak Match"
+
+Use ONLY information explicitly present in the JD and resume.
+Do not invent experience, skills, qualifications or projects."""
+    ),
+    (
+        "user",
+        """JOB DESCRIPTION:
+
+{jd_text}
+
+
+CANDIDATE RESUME:
+
+{resume_text}
+
+
+Now evaluate this candidate and return ONLY the JSON object."""
+    )
+])
+
+# ============================================================
+# LANGCHAIN JSON PARSER
+# ============================================================
+
+# json_parser = JsonOutputParser()
+
+
+# ============================================================
+# QWEN API FUNCTION
+# ============================================================
+
+# def call_qwen(prompt_value):
+
+#     messages = []
+
+#     for message in prompt_value.to_messages():
+
+#         messages.append(
+#             {
+#                 "role": message.type,
+#                 "content": message.content
+#             }
+#         )
+
+#     completion = qwen_client.chat.completions.create(
+
+#         model=LLM_MODEL,
+
+#         messages=messages,
+
+#         temperature=0.1,
+
+#         max_tokens=1000
+#     )
+
+#     return completion.choices[0].message.content
+
+
+# # ============================================================
+# # LANGCHAIN QWEN CHAIN
+# # ============================================================
+
+# qwen_chain = (
+#     qwen_prompt
+#     | RunnableLambda(call_qwen)
+# )
+
+
+# ============================================================
+# QWEN RESUME EVALUATION
+# ============================================================
+
+def evaluate_resume_with_qwen(jd_text, resume_text):
 
     try:
 
-        response = qwen_client.chat.completions.create(
+        # LangChain creates the actual chat messages
+        prompt_value = qwen_prompt.invoke({
+            "jd_text": jd_text,
+            "resume_text": resume_text
+        })
+
+        messages = []
+
+        for message in prompt_value.to_messages():
+
+            role = message.type
+
+            if role == "human":
+                role = "user"
+
+            elif role == "ai":
+                role = "assistant"
+
+            messages.append({
+                "role": role,
+                "content": message.content
+            })
+
+        # Debugging — temporarily keep this
+        print("\n========== QWEN REQUEST ==========")
+
+        for message in messages:
+
+            print(
+                f"\n[{message['role'].upper()}]"
+            )
+
+            print(
+                message["content"][:2000]
+            )
+
+        print("\n===================================\n")
+
+        # Call Qwen
+        completion = qwen_client.chat.completions.create(
 
             model=LLM_MODEL,
 
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a precise technical "
-                        "recruiter and resume evaluator."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            messages=messages,
 
-            temperature=0.1,
+            temperature=0.0,
 
             max_tokens=1000
         )
 
-        result = (
-            response
+        raw_response = (
+            completion
             .choices[0]
             .message
             .content
         )
 
-        return parse_qwen_response(result)
+        print("\n========== QWEN RESPONSE ==========")
+        print(raw_response)
+        print("===================================\n")
+
+        return parse_qwen_json(raw_response)
 
     except Exception as e:
 
@@ -244,67 +342,59 @@ Rules:
             "missing_skills": [],
             "strengths": [],
             "weaknesses": [],
-            "recommendation": "API Error",
+            "recommendation": "Unable to evaluate",
             "reason": str(e)
         }
 
+def parse_qwen_json(response):
 
-# ==============================
-# PARSE QWEN RESPONSE
-# ==============================
-
-def parse_qwen_response(response):
-
+    # Direct JSON
     try:
-
         return json.loads(response)
 
     except json.JSONDecodeError:
+        pass
 
-        # Sometimes models wrap JSON
-        # inside additional text.
-
-        match = re.search(
-            r"\{.*\}",
-            response,
-            re.DOTALL
-        )
-
-        if match:
-
-            try:
-
-                return json.loads(
-                    match.group()
-                )
-
-            except json.JSONDecodeError:
-
-                pass
-
-    print(
-        "⚠️ Could not parse Qwen response:"
+    # JSON inside markdown
+    match = re.search(
+        r"```json\s*(.*?)\s*```",
+        response,
+        re.DOTALL | re.IGNORECASE
     )
 
-    print(response)
+    if match:
 
-    return {
-        "overall_score": 0,
-        "technical_score": 0,
-        "experience_score": 0,
-        "matched_skills": [],
-        "missing_skills": [],
-        "strengths": [],
-        "weaknesses": [],
-        "recommendation":
-            "Unable to evaluate",
-        "reason": response
-    }
+        try:
+            return json.loads(
+                match.group(1)
+            )
+
+        except json.JSONDecodeError:
+            pass
+
+    # Find JSON object inside response
+    start = response.find("{")
+    end = response.rfind("}")
+
+    if start != -1 and end != -1:
+
+        try:
+            return json.loads(
+                response[start:end + 1]
+            )
+
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(
+        "Qwen did not return valid JSON.\n"
+        f"Raw response:\n{response}"
+    )
 
 
-# ==============================
+# ============================================================
 # MAIN MATCHING PIPELINE
-# ==============================
+# ============================================================
 
 def match_resumes(
     jd_folder=JD_FOLDER,
@@ -318,23 +408,9 @@ def match_resumes(
         exist_ok=True
     )
 
-    # ==============================
-    # LOAD EMBEDDING MODEL
-    # ==============================
-
-    print(
-        "Loading embedding model..."
-    )
-
-    embedding_model = SentenceTransformer(
-        EMBEDDING_MODEL,
-        device=device
-    )
-
-
-    # ==============================
-    # LOAD JDs
-    # ==============================
+    # ========================================================
+    # LOAD DOCUMENTS
+    # ========================================================
 
     print("Loading JDs...")
 
@@ -342,37 +418,35 @@ def match_resumes(
         jd_folder
     )
 
-
-    # ==============================
-    # LOAD RESUMES
-    # ==============================
-
-    print("Loading Resumes...")
+    print("Loading resumes...")
 
     resume_docs = load_documents(
         resume_folder
     )
 
+    if not jd_docs:
+        raise ValueError(
+            "No valid JD files found."
+        )
+
+    if not resume_docs:
+        raise ValueError(
+            "No valid resume files found."
+        )
+
     resume_files = list(
         resume_docs.keys()
     )
 
-    if not resume_files:
-
-        raise ValueError(
-            "No valid PDF/DOCX resumes found."
-        )
-
-
     resume_texts = [
-        resume_docs[r]["text"]
-        for r in resume_files
+        resume_docs[file]["text"]
+        for file in resume_files
     ]
 
 
-    # ==============================
-    # RESUME EMBEDDINGS
-    # ==============================
+    # ========================================================
+    # BGE RESUME EMBEDDINGS
+    # ========================================================
 
     print(
         "Generating resume embeddings..."
@@ -389,9 +463,9 @@ def match_resumes(
     )
 
 
-    # ==============================
+    # ========================================================
     # FAISS INDEX
-    # ==============================
+    # ========================================================
 
     dimension = (
         resume_embeddings.shape[1]
@@ -406,18 +480,18 @@ def match_resumes(
     )
 
     print(
-        "⚡ FAISS CPU index created."
+        "✅ FAISS index created."
     )
 
 
-    # ==============================
+    # ========================================================
     # PROCESS EACH JD
-    # ==============================
+    # ========================================================
 
     for jd_file, jd_data in jd_docs.items():
 
         print(
-            f"\n=============================="
+            "\n=============================="
         )
 
         print(
@@ -425,15 +499,15 @@ def match_resumes(
         )
 
         print(
-            f"=============================="
+            "=============================="
         )
 
         jd_text = jd_data["text"]
 
 
-        # ==========================
+        # ====================================================
         # JD EMBEDDING
-        # ==========================
+        # ====================================================
 
         jd_embedding = (
             embedding_model.encode(
@@ -444,28 +518,36 @@ def match_resumes(
         )
 
 
-        # ==========================
-        # FAISS SEARCH
-        # ==========================
+        # ====================================================
+        # FAISS RETRIEVAL
+        # ====================================================
 
-        search_k = min(
+        scores, indices = index.search(
+            jd_embedding,
+            len(resume_files)
+        )
+
+        actual_top_k = min(
             top_k,
             len(resume_files)
         )
 
-        scores, indices = index.search(
-            jd_embedding,
-            search_k
+        top_indices = (
+            indices[0][:actual_top_k]
+        )
+
+        top_scores = (
+            scores[0][:actual_top_k]
         )
 
 
-        # ==========================
+        # ====================================================
         # OUTPUT DIRECTORY
-        # ==========================
+        # ====================================================
 
-        jd_folder_name = os.path.splitext(
-            jd_file
-        )[0]
+        jd_folder_name = (
+            os.path.splitext(jd_file)[0]
+        )
 
         jd_output_path = os.path.join(
             output_folder,
@@ -478,47 +560,45 @@ def match_resumes(
         )
 
 
-        # ==========================
-        # QWEN EVALUATION
-        # ==========================
+        # ====================================================
+        # QWEN ANALYSIS
+        # ====================================================
 
         evaluated_candidates = []
 
-        for position, idx in enumerate(
-            indices[0]
+
+        for idx, embedding_score in zip(
+            top_indices,
+            top_scores
         ):
 
-            resume_file = resume_files[
-                idx
-            ]
+            resume_file = (
+                resume_files[idx]
+            )
 
-            resume_data = resume_docs[
-                resume_file
-            ]
-
-            embedding_score = round(
-                float(
-                    scores[0][position]
-                ) * 100,
-                2
+            resume_text = (
+                resume_docs[
+                    resume_file
+                ]["text"]
             )
 
             print(
-                f"\n🤖 Evaluating: "
+                f"\n🤖 Evaluating with Qwen: "
                 f"{resume_file}"
             )
 
-            print(
-                f"Embedding Score: "
-                f"{embedding_score}%"
-            )
+
+            # ------------------------------------------------
+            # LANGCHAIN → QWEN
+            # ------------------------------------------------
 
             qwen_result = (
                 evaluate_resume_with_qwen(
                     jd_text,
-                    resume_data["text"]
+                    resume_text
                 )
             )
+
 
             qwen_score = float(
                 qwen_result.get(
@@ -527,16 +607,31 @@ def match_resumes(
                 )
             )
 
+            similarity_score = round(
+                float(embedding_score) * 100,
+                2
+            )
+
+
             evaluated_candidates.append(
                 {
                     "file": resume_file,
+
                     "embedding_score":
-                        embedding_score,
+                        similarity_score,
+
                     "qwen_score":
                         qwen_score,
+
                     "evaluation":
                         qwen_result
                 }
+            )
+
+
+            print(
+                f"Embedding Score: "
+                f"{similarity_score}%"
             )
 
             print(
@@ -545,33 +640,40 @@ def match_resumes(
             )
 
 
-        # ==========================
-        # SORT BY QWEN SCORE
-        # ==========================
+        # ====================================================
+        # FINAL RANKING
+        # ====================================================
 
         evaluated_candidates.sort(
-            key=lambda x:
-                x["qwen_score"],
+            key=lambda candidate:
+                candidate["qwen_score"],
             reverse=True
         )
 
 
-        # ==========================
+        # ====================================================
         # COPY MATCHED RESUMES
-        # ==========================
+        # ====================================================
+
+        print(
+            "\nFinal Ranking:"
+        )
+
 
         for rank, candidate in enumerate(
             evaluated_candidates,
             start=1
         ):
 
-            resume_file = candidate[
-                "file"
-            ]
+            resume_file = (
+                candidate["file"]
+            )
 
-            resume_source = resume_docs[
-                resume_file
-            ]["path"]
+            resume_source = (
+                resume_docs[
+                    resume_file
+                ]["path"]
+            )
 
             shutil.copy(
                 resume_source,
@@ -585,9 +687,31 @@ def match_resumes(
             )
 
 
+        # ====================================================
+        # SAVE ANALYSIS JSON
+        # ====================================================
+
+        analysis_path = os.path.join(
+            jd_output_path,
+            "analysis.json"
+        )
+
+        with open(
+            analysis_path,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                evaluated_candidates,
+                file,
+                indent=4,
+                ensure_ascii=False
+            )
+
+
         print(
-            f"\n✅ Completed JD: "
-            f"{jd_file}"
+            f"\n✅ Completed JD: {jd_file}"
         )
 
 
@@ -596,9 +720,9 @@ def match_resumes(
     )
 
 
-# ==============================
-# RUN DIRECTLY
-# ==============================
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
 

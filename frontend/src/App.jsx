@@ -53,7 +53,7 @@ function App() {
       formData.append('top_k', '5');
 
       const response = await fetch(
-        'http://127.0.0.1:8000/api/match',
+        '/api/match',
         {
           method: 'POST',
           body: formData,

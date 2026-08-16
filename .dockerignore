@@ -1,0 +1,35 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local scripts
+run.bat
+
+# Local input/output data
+JDs/
+Resumes/
+Matched_Resumes/
+temp_results/
+
+# Previously generated JD folders
+jd_backend_developer/
+jd_data_engineer/
+jd_ml_engineer/
+
+# VS Code
+.vscode/
+.cache/
+.huggingface/
+
+# Secrets
+.env
+
+# Frontend dependencies
+frontend/node_modules/
+
+# Git
+.git/
+.gitignore
