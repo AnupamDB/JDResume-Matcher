@@ -1,0 +1,32 @@
+name: Docker Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t jd-resume-backend:latest \
+            .
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t jd-resume-frontend:latest \
+            ./frontend
