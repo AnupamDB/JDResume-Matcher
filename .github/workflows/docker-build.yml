@@ -25,8 +25,8 @@ jobs:
             -t jd-resume-backend:latest \
             .
 
-      - name: Build frontend image
+      - name: Build frontend v2 image
         run: |
           docker build \
-            -t jd-resume-frontend:latest \
-            ./frontend
+            -t jd-resume-frontend:v2 \
+            ./frontend-v2
