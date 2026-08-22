@@ -1,0 +1,40 @@
+name: JD Resume CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run backend tests
+        run: |
+          cd backend
+          pytest
+
+      - name: Build backend Docker image
+        run: |
+          docker build -t jd-resume-backend:latest ./backend
+
+      - name: Build frontend v2 Docker image
+        run: |
+          docker build -t jd-resume-frontend:v2 ./frontend-v2

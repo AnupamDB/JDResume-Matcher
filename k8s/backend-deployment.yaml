@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jd-resume-backend
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: jd-resume-backend
+
+  template:
+    metadata:
+      labels:
+        app: jd-resume-backend
+
+    spec:
+      containers:
+        - name: backend
+          image: jd-resume-backend:latest
+
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 8000
+
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: HF_TOKEN

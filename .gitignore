@@ -19,5 +19,6 @@ temp_results/
 # Ignore local VS Code settings
 .vscode/
 .env
+k8s/backend-secret.yaml
 # Ignore node_modules if created later
 frontend/node_modules/

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jd-resume-backend
+spec:
+  selector:
+    app: jd-resume-backend
+
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+  type: ClusterIP

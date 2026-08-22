@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jd-resume-frontend
+spec:
+  selector:
+    app: jd-resume-frontend
+
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+
+  type: NodePort

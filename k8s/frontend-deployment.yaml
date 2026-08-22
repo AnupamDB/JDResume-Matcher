@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jd-resume-frontend
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: jd-resume-frontend
+
+  template:
+    metadata:
+      labels:
+        app: jd-resume-frontend
+
+    spec:
+      containers:
+        - name: frontend
+          image: jd-resume-frontend:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 80
