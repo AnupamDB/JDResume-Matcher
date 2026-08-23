@@ -29,4 +29,4 @@ jobs:
         run: |
           docker build \
             -t jd-resume-frontend:v2 \
-            ./frontend-v2
+            ./frontend
