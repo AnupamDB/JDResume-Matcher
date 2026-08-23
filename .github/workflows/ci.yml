@@ -37,4 +37,4 @@ jobs:
 
       - name: Build frontend v2 Docker image
         run: |
-          docker build -t jd-resume-frontend:v2 ./frontend-v2
+          docker build -t jd-resume-frontend:v2 ./frontend
